@@ -1,0 +1,124 @@
+service: greenhouse-ats-integration
+
+frameworkVersion: "3"
+
+provider:
+  name: aws
+  runtime: python3.11
+  region: ${opt:region, 'us-east-1'}
+  stage: ${opt:stage, 'dev'}
+  memorySize: 256
+  timeout: 29          # API Gateway max is 30 s
+  logRetentionInDays: 30
+
+  environment:
+    GREENHOUSE_API_KEY: ${ssm:/greenhouse/${self:provider.stage}/api_key}
+    GREENHOUSE_ON_BEHALF_OF: ${ssm:/greenhouse/${self:provider.stage}/on_behalf_of, ''}
+
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - ssm:GetParameter
+            - ssm:GetParameters
+          Resource:
+            - arn:aws:ssm:${self:provider.region}:*:parameter/greenhouse/${self:provider.stage}/*
+
+package:
+  individually: false
+  patterns:
+    - "!node_modules/**"
+    - "!.venv/**"
+    - "!tests/**"
+    - "!*.md"
+    - "!*.cfg"
+    - "!*.toml"
+
+functions:
+
+  # ── Jobs ──────────────────────────────────────────────────────────────────
+  listJobs:
+    handler: handler.list_jobs
+    description: "Return paginated open jobs from Greenhouse"
+    events:
+      - httpApi:
+          path: /jobs
+          method: GET
+
+  getJob:
+    handler: handler.get_job
+    description: "Return a single Greenhouse job by ID"
+    events:
+      - httpApi:
+          path: /jobs/{job_id}
+          method: GET
+
+  # ── Candidates ────────────────────────────────────────────────────────────
+  listCandidates:
+    handler: handler.list_candidates
+    description: "Return paginated candidates from Greenhouse"
+    events:
+      - httpApi:
+          path: /candidates
+          method: GET
+
+  createCandidate:
+    handler: handler.create_candidate
+    description: "Create a new candidate and application in Greenhouse"
+    events:
+      - httpApi:
+          path: /candidates
+          method: POST
+
+  # ── Applications ──────────────────────────────────────────────────────────
+  listApplications:
+    handler: handler.list_applications
+    description: "List applications, optionally filtered by job or status"
+    events:
+      - httpApi:
+          path: /applications
+          method: GET
+
+  advanceApplication:
+    handler: handler.advance_application
+    description: "Advance an application to the next interview stage"
+    events:
+      - httpApi:
+          path: /applications/{application_id}/advance
+          method: POST
+
+  rejectApplication:
+    handler: handler.reject_application
+    description: "Reject an application with an optional reason"
+    events:
+      - httpApi:
+          path: /applications/{application_id}/reject
+          method: POST
+
+  # ── Scorecards ────────────────────────────────────────────────────────────
+  listScorecards:
+    handler: handler.list_scorecards
+    description: "List scorecards for an application"
+    events:
+      - httpApi:
+          path: /applications/{application_id}/scorecards
+          method: GET
+
+  # ── Webhooks ──────────────────────────────────────────────────────────────
+  webhook:
+    handler: handler.webhook
+    description: "Receive and dispatch inbound Greenhouse webhook events"
+    events:
+      - httpApi:
+          path: /webhook
+          method: POST
+
+plugins:
+  - serverless-python-requirements
+
+custom:
+  pythonRequirements:
+    dockerizePip: non-linux   # build inside Docker on macOS/Windows for Lambda compatibility
+    slim: true
+    strip: false
